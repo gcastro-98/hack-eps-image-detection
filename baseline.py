@@ -24,16 +24,39 @@ def __load_image(image_path: str):
     return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
 
 
+def __assert_empty_intersection(lower: dict, upper: dict) -> None:
+    for _color in lower.keys():
+        # we generate some random points for each color space
+        random_color_points = []
+        for _ in range(5):
+            random_color_points.append(
+                [np.random.randint(
+                    low=lower[_color][_i], high=upper[_color][_i] + 1)
+                    for _i in range(3)])
+
+        # now we check whether it is not in another color space
+        for _another_color in [_k for _k in lower.keys() if _k != _color]:
+            for _point in random_color_points:
+                assertion_message = f"The color {_color} intersects" \
+                                    f" with {_another_color}! Check this " \
+                                    f"shared element: {_point}"
+                assert not all([lower[_another_color][_i] <=
+                                _point[_i] <= upper[_another_color][_i]
+                                for _i in range(3)]), assertion_message
+    return None
+
+
 def __define_color_bounds(_type) -> Tuple[dict, dict]:
     if _type == 'rgb':
         upper = {
             'red': [255, 100, 100], 'green': [145, 255, 175],
             'blue': [145, 156, 255], 'orange': [255, 130, 100]}
         lower = {
-            'red': [100, 0, 0], 'green': [0, 100, 10],
+            'red': [50, 0, 0], 'green': [0, 100, 10],
             'blue': [0, 10, 100], 'orange': [175, 50, 0]}
+        __assert_empty_intersection(lower, upper)
 
-    elif _type == 'hsv':
+    elif _type == 'hsv':  # not so properly implemented
         lower = {'red': ([166, 84, 141]), 'green': ([50, 50, 120]),
                  'blue': ([97, 100, 117]), 'orange': ([15, 75, 75])}
         upper = {'red': ([186, 255, 255]), 'green': ([70, 255, 255]),

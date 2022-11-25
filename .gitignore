@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Train / test folders
+train/
+test/
+
 # Others
 competition-details.MD
 
