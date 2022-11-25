@@ -9,6 +9,7 @@ test/
 
 # Others
 competition-details.MD
+.idea/
 
 # C extensions
 *.so

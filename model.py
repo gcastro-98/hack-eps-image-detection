@@ -1,13 +1,7 @@
 import cv2
 import numpy as np
-from typing import Tuple
-# import matplotlib.pyplot as plt
+from typing import Tuple, Union
 BLACK: tuple = (0, 0, 0)
-
-
-def retrieve_figures(image_path: str, _visualize: bool = False) -> dict:
-    fig_dict = _detect_shapes_and_colors(image_path, _visualize)
-    return fig_dict
 
 
 def __load_image(image_path: str):
@@ -46,73 +40,94 @@ def __assert_empty_intersection(lower: dict, upper: dict) -> None:
     return None
 
 
-def __define_color_bounds(_type) -> Tuple[dict, dict]:
-    if _type == 'rgb':
-        upper = {
-            'red': [255, 100, 100], 'green': [145, 255, 175],
-            'blue': [145, 156, 255], 'orange': [255, 130, 100]}
-        lower = {
-            'red': [50, 0, 0], 'green': [0, 100, 10],
-            'blue': [0, 10, 100], 'orange': [175, 50, 0]}
+def __define_color_bounds(_type: str, color: str) \
+        -> Tuple[Union[float, list], Union[float, list]]:
+
+    if _type == 'hsv':
+        lower = {'red': ([0, 50, 20]), 'green': ([35, 50, 20]),
+                 'blue': ([80, 50, 20]), 'orange': ([8, 50, 90])}
+        upper = {'red': ([6, 255, 255]), 'green': ([79, 255, 255]),
+                 'blue': ([149, 255, 255]), 'orange': ([34, 255, 255])}
         __assert_empty_intersection(lower, upper)
-
-    elif _type == 'hsv':  # not so properly implemented
-        lower = {'red': ([166, 84, 141]), 'green': ([50, 50, 120]),
-                 'blue': ([97, 100, 117]), 'orange': ([15, 75, 75])}
-        upper = {'red': ([186, 255, 255]), 'green': ([70, 255, 255]),
-                 'blue': ([117, 255, 255]), 'orange': ([40, 100, 100])}
-
     else:
-        raise KeyError(f"Unrecognized color code: {_type}")
+        raise KeyError(f"Unrecognized color code: {_type}; "
+                       f"or not yet implemented.")
+
+    lower, upper = lower[color], upper[color]
+
+    if color == 'red':
+        return [lower, ([150, 50, 20])], [upper, ([255, 255, 255])]
 
     return lower, upper
 
 
-def __create_mask(image, color: str, _type: str = 'rgb'):
+def __create_mask(image, color: str, _type: str = 'hsv'):
     blurred = cv2.GaussianBlur(image, (11, 11), 0)
 
     if _type == 'hsv':
-        lower, upper = __define_color_bounds('hsv')
-        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array(lower[color]), np.array(upper[color]))
-        return mask
+        lower, upper = __define_color_bounds('hsv', color)
+        _c_image = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
-    lower, upper = __define_color_bounds('rgb')
-    rgb = cv2.cvtColor(blurred, cv2.COLOR_BGR2RGB)
-    mask = cv2.inRange(rgb, np.array(lower[color]), np.array(upper[color]))
+    elif _type == 'rgb':
+        lower, upper = __define_color_bounds('rgb', color)  # not implemented
+        _c_image = cv2.cvtColor(blurred, cv2.COLOR_BGR2RGB)
+
+    else:
+        raise KeyError(f'Color type not recognized: {_type}')
+
+    kernel = np.ones((2, 2), np.uint8)
+
+    if color != 'red':
+        mask = cv2.inRange(_c_image, np.array(lower), np.array(upper))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.dilate(mask, kernel, iterations=1 if color != 'orange' else 20)
+    else:
+        mask = __red_mask(_c_image, lower, upper)
+    mask = cv2.erode(mask, np.ones((10, 10), np.uint8))
     return mask
 
 
-def _detect_shapes_and_colors(image_path: str, _visualize: bool = False) -> dict:
+def __red_mask(_c_image, lower, upper):
+    kernel = np.ones((2, 2), np.uint8)
+    _mask_1 = cv2.inRange(_c_image, np.array(lower[0]), np.array(upper[0]))
+    _mask_2 = cv2.inRange(_c_image, np.array(lower[1]), np.array(upper[1]))
+    mask = cv2.bitwise_or(_mask_1, _mask_2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.dilate(mask, kernel, iterations=1)
+
+    return mask
+
+
+def detect_shapes_and_colors(image_path: str, _visualize: bool = False,
+                             _see_mask: bool = False) -> dict:
     image = __load_image(image_path)
     _fig_dict = {'triangles': 0, 'squares': 0, 'rectangles': 0, 'circles': 0,
                  'red': 0, 'green': 0, 'blue': 0, 'logos': 0}
 
-    mask_list = []  # unused
-    hierarchies = []  # unused
-    contours = []
+    contours = []  # obtained after a mask
+    shapes_list = []
     colors_found = []
 
     for key in ['red', 'green', 'blue', 'orange']:
-        kernel = np.ones((2, 2), np.uint8)
         mask = __create_mask(image, key)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.dilate(mask, kernel, iterations=1)
-        mask_list.append(mask)
-        _contour, _hierarchy = cv2.findContours(
+
+        if _see_mask:
+            cv2.imshow(f"{key.capitalize()} mask",
+                       cv2.resize(mask, (700, 700)))
+            cv2.waitKey(0)
+
+        # the second output is the hierarchy: not used
+        _contours, _ = cv2.findContours(
             mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        if len(_contour) > 0:
-            contours.append(_contour[-1])
+        for _contour in _contours:
+            true_shape = __find_shape_from_contour(_contour)
             colors_found.append(key)
-            hierarchies.append(_hierarchy)
-            if key != 'orange':  # in this case, 'orange' = 'logo'
-                _fig_dict[key] += 1
+            shapes_list.append(true_shape)
+            contours.append(_contour)  # not used
 
     # Iterating through each contour to retrieve coordinates of each shape
-    for i, contour in enumerate(contours):
-        approx = cv2.approxPolyDP(
-            contour, 0.01 * cv2.arcLength(contour, True), True)
+    for i, approx in enumerate(shapes_list):
         if colors_found[i] == 'orange':
             shape_name = 'Logo'
             _fig_dict['logos'] += 1
@@ -120,6 +135,7 @@ def _detect_shapes_and_colors(image_path: str, _visualize: bool = False) -> dict
         elif len(approx) == 3:
             shape_name = 'Triangle'
             _fig_dict['triangles'] += 1
+            _fig_dict[colors_found[i]] += 1
         elif len(approx) == 4:
             if __is_square(approx):
                 shape_name = 'Square'
@@ -127,18 +143,19 @@ def _detect_shapes_and_colors(image_path: str, _visualize: bool = False) -> dict
             else:
                 shape_name = 'Rectangle'
                 _fig_dict['rectangles'] += 1
+            _fig_dict[colors_found[i]] += 1
         elif len(approx) > 10:
             shape_name = 'Circle'
             _fig_dict['circles'] += 1
+            _fig_dict[colors_found[i]] += 1
         else:
-            # print("Detected unrecognized shape!")
-            # continue
-            shape_name = 'Unknown'
-            # raise Exception("Unexpected figure (unseen in the training set) with {len(approx)} sides found.")
+            # shape_name = 'Unknown'
+            continue
 
         if _visualize:
             cv2.putText(image, f"{colors_found[i]} {shape_name.lower()}",
-                        __retrieve_coords(approx), cv2.FONT_HERSHEY_DUPLEX, 1, BLACK, 1)
+                        __retrieve_coords(approx), cv2.FONT_HERSHEY_DUPLEX,
+                        1, BLACK, 1)
 
     if _visualize:
         # displaying the image with the detected shapes onto the screen
@@ -149,6 +166,12 @@ def _detect_shapes_and_colors(image_path: str, _visualize: bool = False) -> dict
         cv2.waitKey(0)
 
     return _fig_dict
+
+
+def __find_shape_from_contour(contour):
+    approx = cv2.approxPolyDP(
+        contour, 0.01 * cv2.arcLength(contour, True), True)
+    return approx
 
 
 def __retrieve_coords(approx) -> Tuple:
@@ -164,17 +187,7 @@ def __retrieve_coords(approx) -> Tuple:
 def __is_square(approx, tolerance: int = None) -> bool:
     # retrieving coordinates of the contour
     x, y, w, h = cv2.boundingRect(approx)
-
     if tolerance is None:
         tolerance = min(w // 10, h // 10)
 
     return abs(w - h) < tolerance
-
-
-if __name__ == "__main__":
-    print("Custom",
-          retrieve_figures('train/custom.png', _visualize=True))
-    # print("Triangles", retrieve_figures('train/triangles.png', _visualize=True))
-    # print("Quadrats", retrieve_figures('train/quadrats.png'))
-    # print("Rectangles", retrieve_figures('train/rectangles.png'))
-    # print("Cercles", retrieve_figures('train/cercles.png'))
