@@ -80,7 +80,7 @@ def __create_mask(image, color: str, _type: str = 'hsv'):
     if color != 'red':
         mask = cv2.inRange(_c_image, np.array(lower), np.array(upper))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.dilate(mask, kernel, iterations=1 if color != 'orange' else 20)
+        mask = cv2.dilate(mask, kernel, iterations=1 if color != 'orange' else 30)
     else:
         mask = __red_mask(_c_image, lower, upper)
     mask = cv2.erode(mask, np.ones((10, 10), np.uint8))
@@ -144,13 +144,13 @@ def detect_shapes_and_colors(image_path: str, _visualize: bool = False,
                 shape_name = 'Rectangle'
                 _fig_dict['rectangles'] += 1
             _fig_dict[colors_found[i]] += 1
-        elif len(approx) > 10:
-            shape_name = 'Circle'
-            _fig_dict['circles'] += 1
-            _fig_dict[colors_found[i]] += 1
         else:
-            # shape_name = 'Unknown'
-            continue
+            if __is_circle(approx):
+                shape_name = 'Circle'
+                _fig_dict['circles'] += 1
+                _fig_dict[colors_found[i]] += 1
+            else:
+                continue
 
         if _visualize:
             cv2.putText(image, f"{colors_found[i]} {shape_name.lower()}",
@@ -182,6 +182,18 @@ def __retrieve_coords(approx) -> Tuple:
 
     # variables used to display text on the final image
     return x_mid, y_mid
+
+
+def __is_circle(cnt) -> bool:
+    # noinspection PyBroadException
+    try:
+        _, (MA, ma), angle = cv2.fitEllipse(cnt)  # first return is (x, y)
+        a, b = ma / 2, MA / 2
+        eccentricity = np.sqrt(pow(a, 2) - pow(b, 2))
+        eccentricity = round(eccentricity / a, 2)
+        return eccentricity < 0.6
+    except Exception:
+        return False
 
 
 def __is_square(approx, tolerance: int = None) -> bool:
